@@ -19,43 +19,44 @@ Render.run(render);
 Runner.run(Runner.create(), engine);
 
 // =====================================================
-// ===== VEHICLE BASE CONFIG ===========================
+// ===== ECONOMY SYSTEM ================================
 // =====================================================
 
-const VEHICLES = {
-    buggy: {
-        mass: 40,
-        wheelSize: 25,
-        torque: 0.0008,
-        suspensionStiffness: 0.4,
-        suspensionDamping: 0.2,
-        fuelCapacity: 100,
-        fuelConsumption: 0.05,
-        color: "#00ffcc"
-    }
-};
+let wallet = parseInt(localStorage.getItem("wallet")) || 0;
 
-let selectedVehicle = "buggy";
-let baseConfig = VEHICLES[selectedVehicle];
+function saveWallet() {
+    localStorage.setItem("wallet", wallet);
+}
 
-// =====================================================
-// ===== UPGRADE SYSTEM ================================
-// =====================================================
-
-const DEFAULT_UPGRADES = {
-    engine: 0,
-    suspension: 0,
-    fuel: 0
-};
-
+// Upgrade levels
+const DEFAULT_UPGRADES = { engine: 0, suspension: 0, fuel: 0 };
 let upgrades = JSON.parse(localStorage.getItem("upgrades")) || DEFAULT_UPGRADES;
 
 function saveUpgrades() {
     localStorage.setItem("upgrades", JSON.stringify(upgrades));
 }
 
-function applyUpgrades(base) {
+// Upgrade cost formula (scales exponentially)
+function getUpgradeCost(type) {
+    return Math.floor(100 * Math.pow(1.8, upgrades[type]));
+}
 
+// =====================================================
+// ===== VEHICLE BASE =================================
+// =====================================================
+
+const BASE_VEHICLE = {
+    mass: 40,
+    wheelSize: 25,
+    torque: 0.0008,
+    suspensionStiffness: 0.4,
+    suspensionDamping: 0.2,
+    fuelCapacity: 100,
+    fuelConsumption: 0.05,
+    color: "#00ffcc"
+};
+
+function applyUpgrades(base) {
     return {
         ...base,
         torque: base.torque * (1 + upgrades.engine * 0.2),
@@ -65,9 +66,10 @@ function applyUpgrades(base) {
     };
 }
 
-let config = applyUpgrades(baseConfig);
+let config = applyUpgrades(BASE_VEHICLE);
 let fuel = config.fuelCapacity;
 let gameOver = false;
+let distance = 0;
 
 // =====================================================
 // ===== TERRAIN =======================================
@@ -98,6 +100,21 @@ for (let i = 0; i < 200; i++) {
 }
 
 // =====================================================
+// ===== COINS =========================================
+// =====================================================
+
+let coins = [];
+
+for (let i = 500; i < 6000; i += 700) {
+    const coin = Bodies.circle(i, window.innerHeight - 250, 15, {
+        isSensor: true,
+        render: { fillStyle: "gold" }
+    });
+    coins.push(coin);
+    World.add(world, coin);
+}
+
+// =====================================================
 // ===== VEHICLE CREATION ==============================
 // =====================================================
 
@@ -109,13 +126,8 @@ function createVehicle(x, y) {
         render: { fillStyle: config.color }
     });
 
-    const wheelA = Bodies.circle(x - 40, y + 30, config.wheelSize, {
-        friction: 0.9
-    });
-
-    const wheelB = Bodies.circle(x + 40, y + 30, config.wheelSize, {
-        friction: 0.9
-    });
+    const wheelA = Bodies.circle(x - 40, y + 30, config.wheelSize, { friction: 0.9 });
+    const wheelB = Bodies.circle(x + 40, y + 30, config.wheelSize, { friction: 0.9 });
 
     const axelA = Constraint.create({
         bodyA: chassis,
@@ -143,14 +155,8 @@ function createVehicle(x, y) {
 const vehicle = createVehicle(300, 200);
 
 // =====================================================
-// ===== ENGINE LOGIC ==================================
+// ===== CONTROLS ======================================
 // =====================================================
-
-function getTorque(speed) {
-    const optimalSpeed = 10;
-    if (speed < optimalSpeed) return config.torque;
-    return config.torque * (optimalSpeed / speed);
-}
 
 let accelerating = false;
 
@@ -162,20 +168,48 @@ window.addEventListener("keyup", e => {
     if (e.code === "ArrowRight") accelerating = false;
 });
 
+// =====================================================
+// ===== COLLISION HANDLER =============================
+// =====================================================
+
+Events.on(engine, "collisionStart", event => {
+    event.pairs.forEach(pair => {
+        coins.forEach((coin, index) => {
+            if (pair.bodyA === coin || pair.bodyB === coin) {
+                World.remove(world, coin);
+                coins.splice(index, 1);
+                wallet += 25;
+                saveWallet();
+            }
+        });
+    });
+});
+
+// =====================================================
+// ===== UPDATE LOOP ===================================
+// =====================================================
+
+function getTorque(speed) {
+    const optimalSpeed = 10;
+    if (speed < optimalSpeed) return config.torque;
+    return config.torque * (optimalSpeed / speed);
+}
+
 Events.on(engine, "beforeUpdate", () => {
 
     if (gameOver) return;
 
     if (accelerating && fuel > 0) {
-
         const speed = Math.abs(vehicle.wheelA.angularVelocity);
         const torque = getTorque(speed);
 
         Body.setAngularVelocity(vehicle.wheelA, vehicle.wheelA.angularVelocity + torque);
         Body.setAngularVelocity(vehicle.wheelB, vehicle.wheelB.angularVelocity + torque);
 
-        fuel -= baseConfig.fuelConsumption;
+        fuel -= BASE_VEHICLE.fuelConsumption;
     }
+
+    distance = Math.floor(vehicle.chassis.position.x / 10);
 
     if (Math.abs(vehicle.chassis.angle) > 1.6) gameOver = true;
     if (fuel <= 0) gameOver = true;
@@ -190,15 +224,25 @@ Events.on(engine, "beforeUpdate", () => {
 });
 
 // =====================================================
-// ===== SIMPLE UPGRADE CONTROLS (TESTING) =============
+// ===== UPGRADE PURCHASE CONTROLS =====================
 // =====================================================
 
 window.addEventListener("keypress", e => {
 
-    if (e.key === "1") upgrades.engine++;
-    if (e.key === "2") upgrades.suspension++;
-    if (e.key === "3") upgrades.fuel++;
-
-    saveUpgrades();
-    location.reload();
+    if (e.key === "1") buyUpgrade("engine");
+    if (e.key === "2") buyUpgrade("suspension");
+    if (e.key === "3") buyUpgrade("fuel");
 });
+
+function buyUpgrade(type) {
+
+    const cost = getUpgradeCost(type);
+
+    if (wallet >= cost) {
+        wallet -= cost;
+        upgrades[type]++;
+        saveWallet();
+        saveUpgrades();
+        location.reload();
+    }
+}
