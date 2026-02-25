@@ -1,11 +1,13 @@
 const { Engine, Render, Runner, Bodies, Composite, Constraint, Body, Events } = Matter;
 
-// Engine
+// ===== ENGINE =====
+
 const engine = Engine.create();
 const world = engine.world;
 engine.gravity.y = 1;
 
-// Renderer
+// ===== RENDER =====
+
 const render = Render.create({
   element: document.body,
   canvas: document.getElementById("game"),
@@ -30,7 +32,7 @@ let lastY = window.innerHeight - 200;
 function generateTerrainSegment() {
 
   const width = 200;
-  const heightVariation = (Math.random() - 0.5) * 150;
+  const heightVariation = (Math.random() - 0.5) * 120;
   const nextY = lastY + heightVariation;
 
   const angle = Math.atan2(nextY - lastY, width);
@@ -43,6 +45,7 @@ function generateTerrainSegment() {
     {
       isStatic: true,
       angle: angle,
+      friction: 1,
       render: { fillStyle: "#2ecc71" }
     }
   );
@@ -54,36 +57,52 @@ function generateTerrainSegment() {
   lastY = nextY;
 }
 
-// Generate initial terrain
+// initial terrain
 for (let i = 0; i < 40; i++) {
   generateTerrainSegment();
 }
 
-// ===== VEHICLE =====
+// ===== VEHICLE SYSTEM =====
 
 let carBody, wheelA, wheelB;
+let motorSpeed = 0;
+let gameOver = false;
 
 function createCar() {
 
-  carBody = Bodies.rectangle(300, 300, 100, 30, {
+  carBody = Bodies.rectangle(300, 300, 120, 30, {
+    density: 0.003,
+    friction: 0.6,
+    frictionAir: 0.02
+  });
+
+  // lower centre of mass
+  Body.setCentre(carBody, { x: 0, y: 15 }, true);
+
+  wheelA = Bodies.circle(260, 330, 28, {
+    friction: 1.5,
     density: 0.002
   });
 
-  wheelA = Bodies.circle(260, 330, 25, { friction: 1 });
-  wheelB = Bodies.circle(340, 330, 25, { friction: 1 });
+  wheelB = Bodies.circle(340, 330, 28, {
+    friction: 1.5,
+    density: 0.002
+  });
 
   const axelA = Constraint.create({
     bodyA: carBody,
     bodyB: wheelA,
-    stiffness: 0.6,
-    length: 30
+    stiffness: 0.4,
+    damping: 0.2,
+    length: 35
   });
 
   const axelB = Constraint.create({
     bodyA: carBody,
     bodyB: wheelB,
-    stiffness: 0.6,
-    length: 30
+    stiffness: 0.4,
+    damping: 0.2,
+    length: 35
   });
 
   Composite.add(world, [carBody, wheelA, wheelB, axelA, axelB]);
@@ -94,46 +113,55 @@ createCar();
 // ===== CONTROLS =====
 
 document.addEventListener("keydown", (e) => {
-  if (!carBody) return;
+  if (gameOver) return;
 
-  if (e.key === "ArrowRight") {
-    Body.applyForce(wheelA, wheelA.position, { x: 0.02, y: 0 });
-    Body.applyForce(wheelB, wheelB.position, { x: 0.02, y: 0 });
-  }
-
-  if (e.key === "ArrowLeft") {
-    Body.applyForce(wheelA, wheelA.position, { x: -0.02, y: 0 });
-    Body.applyForce(wheelB, wheelB.position, { x: -0.02, y: 0 });
-  }
+  if (e.key === "ArrowRight") motorSpeed = 0.15;
+  if (e.key === "ArrowLeft") motorSpeed = -0.15;
 });
 
-// ===== CAMERA FOLLOW =====
+document.addEventListener("keyup", () => {
+  motorSpeed = 0;
+});
+
+// ===== ENGINE UPDATE LOOP =====
 
 Events.on(engine, "beforeUpdate", () => {
 
-  if (!carBody) return;
+  if (!carBody || gameOver) return;
 
+  // Motor torque
+  Body.setAngularVelocity(wheelA, motorSpeed);
+  Body.setAngularVelocity(wheelB, motorSpeed);
+
+  // Air control
+  const airborne = Math.abs(carBody.position.y - wheelA.position.y) > 50;
+  if (airborne) {
+    Body.setAngularVelocity(
+      carBody,
+      carBody.angularVelocity + motorSpeed * 0.05
+    );
+  }
+
+  // Camera follow
   render.bounds.min.x = carBody.position.x - window.innerWidth / 2;
   render.bounds.max.x = carBody.position.x + window.innerWidth / 2;
-
   render.bounds.min.y = 0;
   render.bounds.max.y = window.innerHeight;
-
   Render.lookAt(render, render.bounds);
 });
 
-// ===== TERRAIN EXTENSION & CLEANUP =====
+// ===== TERRAIN MANAGEMENT =====
 
 Events.on(engine, "afterUpdate", () => {
 
-  if (!carBody) return;
+  if (!carBody || gameOver) return;
 
-  // Generate more terrain ahead
+  // extend terrain
   if (terrainX < carBody.position.x + 2000) {
     generateTerrainSegment();
   }
 
-  // Remove old terrain behind
+  // cleanup old terrain
   terrainSegments = terrainSegments.filter(segment => {
     if (segment.position.x < carBody.position.x - 2000) {
       Composite.remove(world, segment);
@@ -141,15 +169,8 @@ Events.on(engine, "afterUpdate", () => {
     }
     return true;
   });
-});
 
-// ===== FLIP DETECTION =====
-
-let gameOver = false;
-
-Events.on(engine, "afterUpdate", () => {
-  if (!carBody || gameOver) return;
-
+  // flip detection
   if (Math.abs(carBody.angle) > Math.PI / 2) {
     gameOver = true;
     setTimeout(resetGame, 1500);
@@ -159,7 +180,9 @@ Events.on(engine, "afterUpdate", () => {
 // ===== RESET =====
 
 function resetGame() {
+
   Composite.clear(world, false);
+
   terrainSegments = [];
   terrainX = 0;
   lastY = window.innerHeight - 200;
@@ -169,5 +192,6 @@ function resetGame() {
   }
 
   gameOver = false;
+  motorSpeed = 0;
   createCar();
 }
