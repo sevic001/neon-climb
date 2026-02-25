@@ -1,4 +1,4 @@
-const { Engine, Render, Runner, Bodies, Composite, Constraint, Body } = Matter;
+const { Engine, Render, Runner, Bodies, Composite, Constraint, Body, Events } = Matter;
 
 // Engine
 const engine = Engine.create();
@@ -21,55 +21,54 @@ const render = Render.create({
 Render.run(render);
 Runner.run(Runner.create(), engine);
 
-// Ground
+// Wide Ground
 const ground = Bodies.rectangle(
-  window.innerWidth / 2,
+  5000,
   window.innerHeight - 50,
-  window.innerWidth,
+  10000,
   100,
   { isStatic: true }
 );
 
 Composite.add(world, ground);
 
-// ===== VEHICLE =====
+// ===== VEHICLE FUNCTION =====
 
-// Car body
-const carBody = Bodies.rectangle(300, 300, 100, 30, {
-  density: 0.002
-});
+let carBody, wheelA, wheelB;
 
-// Wheels
-const wheelA = Bodies.circle(260, 330, 25, {
-  friction: 1,
-  restitution: 0.2
-});
+function createCar() {
 
-const wheelB = Bodies.circle(340, 330, 25, {
-  friction: 1,
-  restitution: 0.2
-});
+  carBody = Bodies.rectangle(300, 300, 100, 30, {
+    density: 0.002
+  });
 
-// Suspension constraints
-const axelA = Constraint.create({
-  bodyA: carBody,
-  bodyB: wheelA,
-  stiffness: 0.6,
-  length: 30
-});
+  wheelA = Bodies.circle(260, 330, 25, { friction: 1 });
+  wheelB = Bodies.circle(340, 330, 25, { friction: 1 });
 
-const axelB = Constraint.create({
-  bodyA: carBody,
-  bodyB: wheelB,
-  stiffness: 0.6,
-  length: 30
-});
+  const axelA = Constraint.create({
+    bodyA: carBody,
+    bodyB: wheelA,
+    stiffness: 0.6,
+    length: 30
+  });
 
-Composite.add(world, [carBody, wheelA, wheelB, axelA, axelB]);
+  const axelB = Constraint.create({
+    bodyA: carBody,
+    bodyB: wheelB,
+    stiffness: 0.6,
+    length: 30
+  });
+
+  Composite.add(world, [carBody, wheelA, wheelB, axelA, axelB]);
+}
+
+createCar();
 
 // ===== CONTROLS =====
 
 document.addEventListener("keydown", (e) => {
+  if (!carBody) return;
+
   if (e.key === "ArrowRight") {
     Body.applyForce(wheelA, wheelA.position, { x: 0.02, y: 0 });
     Body.applyForce(wheelB, wheelB.position, { x: 0.02, y: 0 });
@@ -80,3 +79,41 @@ document.addEventListener("keydown", (e) => {
     Body.applyForce(wheelB, wheelB.position, { x: -0.02, y: 0 });
   }
 });
+
+// ===== CAMERA FOLLOW =====
+
+Events.on(engine, "beforeUpdate", () => {
+  if (!carBody) return;
+
+  render.bounds.min.x = carBody.position.x - window.innerWidth / 2;
+  render.bounds.max.x = carBody.position.x + window.innerWidth / 2;
+
+  render.bounds.min.y = 0;
+  render.bounds.max.y = window.innerHeight;
+
+  Render.lookAt(render, render.bounds);
+});
+
+// ===== FLIP DETECTION =====
+
+let gameOver = false;
+
+Events.on(engine, "afterUpdate", () => {
+  if (!carBody || gameOver) return;
+
+  const angle = carBody.angle;
+
+  if (Math.abs(angle) > Math.PI / 2) {
+    gameOver = true;
+    setTimeout(resetGame, 1500);
+  }
+});
+
+// ===== RESET =====
+
+function resetGame() {
+  Composite.clear(world, false);
+  Composite.add(world, ground);
+  gameOver = false;
+  createCar();
+}
