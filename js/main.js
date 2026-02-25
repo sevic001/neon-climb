@@ -21,18 +21,45 @@ const render = Render.create({
 Render.run(render);
 Runner.run(Runner.create(), engine);
 
-// Wide Ground
-const ground = Bodies.rectangle(
-  5000,
-  window.innerHeight - 50,
-  10000,
-  100,
-  { isStatic: true }
-);
+// ===== TERRAIN SYSTEM =====
 
-Composite.add(world, ground);
+let terrainSegments = [];
+let terrainX = 0;
+let lastY = window.innerHeight - 200;
 
-// ===== VEHICLE FUNCTION =====
+function generateTerrainSegment() {
+
+  const width = 200;
+  const heightVariation = (Math.random() - 0.5) * 150;
+  const nextY = lastY + heightVariation;
+
+  const angle = Math.atan2(nextY - lastY, width);
+
+  const segment = Bodies.rectangle(
+    terrainX + width / 2,
+    (lastY + nextY) / 2,
+    width,
+    40,
+    {
+      isStatic: true,
+      angle: angle,
+      render: { fillStyle: "#2ecc71" }
+    }
+  );
+
+  Composite.add(world, segment);
+  terrainSegments.push(segment);
+
+  terrainX += width;
+  lastY = nextY;
+}
+
+// Generate initial terrain
+for (let i = 0; i < 40; i++) {
+  generateTerrainSegment();
+}
+
+// ===== VEHICLE =====
 
 let carBody, wheelA, wheelB;
 
@@ -83,6 +110,7 @@ document.addEventListener("keydown", (e) => {
 // ===== CAMERA FOLLOW =====
 
 Events.on(engine, "beforeUpdate", () => {
+
   if (!carBody) return;
 
   render.bounds.min.x = carBody.position.x - window.innerWidth / 2;
@@ -94,6 +122,27 @@ Events.on(engine, "beforeUpdate", () => {
   Render.lookAt(render, render.bounds);
 });
 
+// ===== TERRAIN EXTENSION & CLEANUP =====
+
+Events.on(engine, "afterUpdate", () => {
+
+  if (!carBody) return;
+
+  // Generate more terrain ahead
+  if (terrainX < carBody.position.x + 2000) {
+    generateTerrainSegment();
+  }
+
+  // Remove old terrain behind
+  terrainSegments = terrainSegments.filter(segment => {
+    if (segment.position.x < carBody.position.x - 2000) {
+      Composite.remove(world, segment);
+      return false;
+    }
+    return true;
+  });
+});
+
 // ===== FLIP DETECTION =====
 
 let gameOver = false;
@@ -101,9 +150,7 @@ let gameOver = false;
 Events.on(engine, "afterUpdate", () => {
   if (!carBody || gameOver) return;
 
-  const angle = carBody.angle;
-
-  if (Math.abs(angle) > Math.PI / 2) {
+  if (Math.abs(carBody.angle) > Math.PI / 2) {
     gameOver = true;
     setTimeout(resetGame, 1500);
   }
@@ -113,7 +160,14 @@ Events.on(engine, "afterUpdate", () => {
 
 function resetGame() {
   Composite.clear(world, false);
-  Composite.add(world, ground);
+  terrainSegments = [];
+  terrainX = 0;
+  lastY = window.innerHeight - 200;
+
+  for (let i = 0; i < 40; i++) {
+    generateTerrainSegment();
+  }
+
   gameOver = false;
   createCar();
 }
